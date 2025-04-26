@@ -141,6 +141,7 @@ if st.session_state.run:
     cam.release()
 
 # --- After Stop: Save & Analyze ---
+# --- After Stop: Save & Analyze ---
 if not st.session_state.run and st.session_state.emotion_log:
     df = pd.DataFrame(st.session_state.emotion_log)
     session_id = st.session_state.session_id
@@ -153,39 +154,54 @@ if not st.session_state.run and st.session_state.emotion_log:
             st.download_button("📥 Download Emotion Log CSV", data=f, file_name=csv_file, mime="text/csv")
 
         st.subheader("📊 Emotion Analysis")
-        top3 = df['emotion'].value_counts().head(3)
+
+        df['timestamp'] = pd.to_datetime(df['timestamp'])
+
+        # Pie Chart - Emotion vs Time Proportion
+        st.markdown("#### 🥧 Time Spent in Each Emotion")
+        emotion_counts = df['emotion'].value_counts()
+        fig1, ax1 = plt.subplots()
+        ax1.pie(emotion_counts, labels=emotion_counts.index, autopct='%1.1f%%', startangle=90)
+        ax1.axis('equal')
+        st.pyplot(fig1)
+
+        # Insights
+        st.markdown("#### 💡 Interpretation")
+        total = emotion_counts.sum()
+        bored_time = emotion_counts.get('bored', 0)
+        confused_time = emotion_counts.get('confused', 0)
+        frustrated_time = emotion_counts.get('frustrated', 0)
+        happy_time = emotion_counts.get('happy', 0)
+        focused_time = emotion_counts.get('focused', 0)
+
+        if bored_time / total > 0.25:
+            st.info("📌 **Student might be bored.**")
+
+        if (confused_time + frustrated_time) / total > 0.25:
+            st.warning("❓ **Student might possibly have a doubt.**")
+
+        if (happy_time + focused_time) / total > 0.3:
+            st.success("✅ **Student understands the lesson.**")
+
+        # Bar Chart - Emotion vs Total Frames (Time)
+        st.markdown("#### 📊 Emotion Duration (Frame Count)")
+        fig2, ax2 = plt.subplots()
+        emotion_counts.plot(kind='bar', ax=ax2, color='lightcoral')
+        ax2.set_xlabel("Emotion")
+        ax2.set_ylabel("Time Detected (frames)")
+        ax2.set_title("Emotion vs Time")
+        st.pyplot(fig2)
+
+        # Average Confidence Chart
+        avg_conf = df.groupby('emotion')['confidence'].mean().reset_index()
+
+        # Top 3 Emotions Text
+        top3 = emotion_counts.head(3)
         st.markdown("#### 🏆 Top 3 Detected Emotions")
         for i, (emo, count) in enumerate(top3.items(), 1):
             st.write(f"**{i}. {emo.capitalize()}** — {count} times")
 
-        st.markdown("#### 🔢 Emotion Frequency Distribution")
-        freq_chart = alt.Chart(df).mark_bar().encode(
-            x=alt.X('emotion:N', sort='-y'),
-            y='count()',
-            color='emotion:N'
-        ).properties(width=600)
-        st.altair_chart(freq_chart)
-
-        st.markdown("#### ⏳ Emotion Over Time")
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
-        timeline_chart = alt.Chart(df).mark_circle(size=60).encode(
-            x='timestamp:T',
-            y='emotion:N',
-            color='emotion:N',
-            tooltip=['timestamp', 'emotion', 'confidence']
-        ).interactive().properties(height=300, width=700)
-        st.altair_chart(timeline_chart)
-
-        st.markdown("#### 📐 Average Confidence per Emotion")
-        avg_conf = df.groupby('emotion')['confidence'].mean().reset_index()
-        avg_chart = alt.Chart(avg_conf).mark_bar().encode(
-            x='emotion:N',
-            y='confidence:Q',
-            color='emotion:N'
-        ).properties(width=600)
-        st.altair_chart(avg_chart)
-
-        # Generate PDF
-        pdf_path = generate_pdf(session_id, df, top3, avg_conf)
+        # Generate PDF with new top3 and avg_conf
+        pdf_path = generate_pdf(session_id, df, top3.to_dict(), avg_conf)
         with open(pdf_path, "rb") as f:
             st.download_button("📄 Download PDF Report", data=f, file_name=pdf_path, mime="application/pdf")
