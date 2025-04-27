@@ -12,6 +12,8 @@ import altair as alt
 import matplotlib.pyplot as plt
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
+from slack_messages import send_file_to_user
+
 
 # --- Load Models ---
 @st.cache_resource
@@ -111,11 +113,15 @@ if 'emotion_log' not in st.session_state:
     st.session_state.emotion_log = []
 if 'session_id' not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())[:8]
+if 'report_generated' not in st.session_state:
+    st.session_state.report_generated = False
+
 
 col1, col2 = st.columns(2)
 with col1:
     if st.button("▶️ Start Video"):
         st.session_state.run = True
+        st.session_state.report_generated = False
 with col2:
     if st.button("⏹️ Stop Video"):
         st.session_state.run = False
@@ -142,7 +148,7 @@ if st.session_state.run:
 
 # --- After Stop: Save & Analyze ---
 # --- After Stop: Save & Analyze ---
-if not st.session_state.run and st.session_state.emotion_log:
+if not st.session_state.run and st.session_state.emotion_log and not st.session_state.report_generated:
     df = pd.DataFrame(st.session_state.emotion_log)
     session_id = st.session_state.session_id
     csv_file = f"emotion_log_{session_id}.csv"
@@ -205,3 +211,10 @@ if not st.session_state.run and st.session_state.emotion_log:
         pdf_path = generate_pdf(session_id, df, top3.to_dict(), avg_conf)
         with open(pdf_path, "rb") as f:
             st.download_button("📄 Download PDF Report", data=f, file_name=pdf_path, mime="application/pdf")
+
+        # Slack part
+        user_id = "U08PEE90BJT"  
+        send_file_to_user(user_id, pdf_path, message="Emotion Analytics Report is ready!")
+        st.session_state.report_generated = True
+
+
