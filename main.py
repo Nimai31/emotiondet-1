@@ -5,16 +5,16 @@ from PIL import Image
 import numpy as np
 from ultralytics import YOLO
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 import uuid
 import os
 import altair as alt
 import matplotlib.pyplot as plt
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
-from slack_messages import send_file_to_user
+from slack_messages import send_file_to_user, send_text_to_user, send_face_with_caption
 from deep_sort_realtime.deepsort_tracker import DeepSort
-from pdf_report import generate_pdf
+from pdf_report import generate_pdf, generate_bored_students_pdf
 
 
 
@@ -103,6 +103,16 @@ if 'report_generated' not in st.session_state:
     st.session_state.report_generated = False
 if 'saved_faces' not in st.session_state:
     st.session_state.saved_faces = {}  # Track ID to filepath
+if 'bored_counter' not in st.session_state:
+    st.session_state.bored_counter = {}  # {track_id: consecutive_bored_frames}
+if 'last_notification_time' not in st.session_state:
+    st.session_state.last_notification_time = datetime.min
+if "notified_bored_ids" not in st.session_state:
+    st.session_state.notified_bored_ids = set()
+if 'bored_report_sent' not in st.session_state:
+    st.session_state.bored_report_sent = False
+
+
 
 
 
@@ -117,7 +127,7 @@ with col2:
 
 # --- Real-time Capture ---
 if st.session_state.run:
-    cam = cv2.VideoCapture('classroom.mp4')
+    cam = cv2.VideoCapture(0)
     while st.session_state.run:
         ret, frame = cam.read()
         if not ret:
@@ -127,6 +137,32 @@ if st.session_state.run:
         annotated, emotions = get_emotions(frame, face_model, emotion_model, tracker)
         for emotion_data in emotions:
             face_id = emotion_data["id"]
+            # --- Boredom Tracking Logic ---
+            emotion = emotion_data["emotion"]
+
+            # Count consecutive bored frames
+            if emotion == "bored":
+                st.session_state.bored_counter[face_id] = st.session_state.bored_counter.get(face_id, 0) + 1
+            else:
+                st.session_state.bored_counter[face_id] = 0
+
+            # Threshold check
+            BORED_THRESHOLD = 20  # frames
+
+            if st.session_state.bored_counter[face_id] == BORED_THRESHOLD:
+                if face_id not in st.session_state.notified_bored_ids:
+                    face_path = st.session_state.saved_faces.get(face_id)
+                    if face_path:
+                        send_face_with_caption(
+                            user_id="U08PEE90BJT",
+                            face_path=face_path,
+                            caption=f"😴 Student ID {face_id} has been bored for a while."
+                        )
+                    
+                    # Mark this face ID as already notified
+                    st.session_state.notified_bored_ids.add(face_id)
+                    st.session_state.bored_report_sent = True
+
 
             # Save face image only once per ID
             if face_id not in st.session_state.saved_faces:
@@ -144,6 +180,26 @@ if st.session_state.run:
                 "confidence": round(emotion_data["confidence"] * 100, 2),
                 "face_path": face_filename
             })
+        CHECK_INTERVAL = timedelta(seconds=10)
+        now = datetime.now()
+
+        if now - st.session_state.last_notification_time > CHECK_INTERVAL:
+            st.session_state.last_notification_time = now
+            bored_ids = [id for id, count in st.session_state.bored_counter.items() if count >= BORED_THRESHOLD]
+            all_ids = list({e["id"] for e in st.session_state.emotion_log})
+            
+            if all_ids:
+                bored_ratio = len(bored_ids) / len(all_ids)
+                if bored_ratio >= 0.4:
+                    msg = f"😴 {len(bored_ids)} out of {len(all_ids)} students ({bored_ratio * 100:.1f}%) seem unengaged."
+                    send_text_to_user(user_id="U08PEE90BJT", message=msg)
+
+                    pdf_path = generate_bored_students_pdf(
+                        session_id=st.session_state.session_id,
+                        bored_ids=bored_ids,
+                        saved_faces=st.session_state.saved_faces
+                    )
+                    send_file_to_user(user_id="U08PEE90BJT", file_path=pdf_path, message="📝 Bored Students Summary Report")
 
         annotated_rgb = cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB)
         FRAME_WINDOW.image(annotated_rgb)

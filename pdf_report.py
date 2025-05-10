@@ -136,3 +136,43 @@ def generate_pdf(session_id, df, saved_faces):
     doc.build(elements)
 
     return pdf_path
+
+def generate_bored_students_pdf(session_id, bored_ids, saved_faces):
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib import colors
+    import os
+
+    pdf_path = f"bored_students_{session_id}.pdf"
+    doc = SimpleDocTemplate(pdf_path, pagesize=letter)
+    elements = []
+    styles = getSampleStyleSheet()
+
+    title = Paragraph("<b>List of Bored Students</b>", styles['Title'])
+    elements.append(title)
+    elements.append(Spacer(1, 20))
+
+    for student_id in bored_ids:
+        face_path = saved_faces.get(student_id)
+
+        # Add a header and background section
+        bg_table = Table([['']], colWidths=[doc.width], rowHeights=20)
+        bg_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), colors.lightgrey)
+        ]))
+        elements.append(bg_table)
+
+        header = Paragraph(f"<b>Student ID: {student_id}</b>", styles['Heading2'])
+        elements.append(header)
+        elements.append(Spacer(1, 10))
+
+        if face_path and os.path.exists(face_path):
+            img = Image(face_path, width=100, height=100)
+            elements.append(img)
+
+        elements.append(Spacer(1, 20))
+
+    doc.build(elements)
+    return pdf_path
+
