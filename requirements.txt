@@ -1,0 +1,26 @@
+# Core packages
+numpy
+pandas
+matplotlib
+opencv-python-headless
+Pillow
+
+# Streamlit
+streamlit
+
+# YOLOv8 (includes torch, torchvision, ultralytics)
+ultralytics
+
+# DeepSORT
+deep_sort_realtime
+
+# Report generation
+reportlab
+
+# Slack integration
+slack_sdk
+python-dotenv
+
+# Optional for development
+ipykernel
+
