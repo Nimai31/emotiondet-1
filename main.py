@@ -36,6 +36,46 @@ class_map = {
     6: 'surprised'
 }
 
+emotion_colors = {
+    'bored': (0, 0, 255),       # Red
+    'confused': (255, 165, 0),  # Orange
+    'focused': (0, 255, 0),     # Green
+    'frustrated': (128, 0, 128),# Purple
+    'happy': (255, 255, 0),     # Yellow
+    'neutral': (200, 200, 200), # Grey
+    'surprised': (0, 255, 255)  # Cyan
+}
+
+# --- Engagement Weights ---
+engagement_weights = {
+    'focused': 1.0,
+    'happy': 0.8,
+    'neutral': 0.6,
+    'surprised': 0.4,
+    'confused': 0.3,
+    'frustrated': 0.2,
+    'bored': 0.0
+}
+
+def calculate_engagement_index(emotion_counts):
+    total = sum(emotion_counts.values())
+    if total == 0:
+        return 0.0  
+    weighted_sum = sum(engagement_weights[emo] * count for emo, count in emotion_counts.items())
+    return weighted_sum / total
+
+def classify_engagement(score):
+    if score >= 0.8:
+        return "🟢 Highly Engaged"
+    elif score >= 0.6:
+        return "🟡 Moderately Engaged"
+    elif score >= 0.4:
+        return "🟠 At Risk"
+    else:
+        return "🔴 Disengaged"
+
+
+
 def get_emotions(frame, face_model, emotion_model, tracker):
     results = face_model(frame)[0]
     annotated_frame = frame.copy()
@@ -75,7 +115,8 @@ def get_emotions(frame, face_model, emotion_model, tracker):
         })
 
         # Draw rectangle and label
-        cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        color = emotion_colors.get(emotion_label, (255, 255, 255))  # default: white
+        cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), color, 2)
         text = f"ID {track_id}: {emotion_label} ({confidence*100:.1f}%)"
         cv2.putText(annotated_frame, text, (x1, y1 - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
@@ -127,12 +168,21 @@ with col2:
 
 # --- Real-time Capture ---
 if st.session_state.run:
-    cam = cv2.VideoCapture(0)
+    cam = cv2.VideoCapture(0) 
+    frame_number = 0
+    output_path = f"annotated_output_{st.session_state.session_id}.mp4"
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    fps = cam.get(cv2.CAP_PROP_FPS)
+    width = int(cam.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cam.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    out_writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+
     while st.session_state.run:
         ret, frame = cam.read()
         if not ret:
-            st.error("Failed to grab frame.")
+            st.error("video playback completed")
             break
+        frame_number += 1  # <-- Add this line here
         frame = cv2.flip(frame, 1)
         annotated, emotions = get_emotions(frame, face_model, emotion_model, tracker)
         for emotion_data in emotions:
@@ -147,7 +197,7 @@ if st.session_state.run:
                 st.session_state.bored_counter[face_id] = 0
 
             # Threshold check
-            BORED_THRESHOLD = 20  # frames
+            BORED_THRESHOLD = 200  # frames
 
             if st.session_state.bored_counter[face_id] == BORED_THRESHOLD:
                 if face_id not in st.session_state.notified_bored_ids:
@@ -175,6 +225,7 @@ if st.session_state.run:
 
             st.session_state.emotion_log.append({
                 "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "frame_number": frame_number,
                 "id": face_id,
                 "emotion": emotion_data["emotion"],
                 "confidence": round(emotion_data["confidence"] * 100, 2),
@@ -201,14 +252,38 @@ if st.session_state.run:
                     )
                     send_file_to_user(user_id="U08PEE90BJT", file_path=pdf_path, message="📝 Bored Students Summary Report")
 
+        cv2.putText(annotated, f"Frame: {frame_number}", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+        out_writer.write(annotated)
         annotated_rgb = cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB)
         FRAME_WINDOW.image(annotated_rgb)
     cam.release()
+    out_writer.release()
+    st.success(f"📼 Annotated video saved")
+    with open(output_path, "rb") as video_file:
+        st.download_button(
+            label="📥 Download Annotated Video",
+            data=video_file,
+            file_name=output_path,
+            mime="video/mp4"
+        )
 
-# --- After Stop: Save & Analyze ---
+
+
+
 # --- After Stop: Save & Analyze ---
 if not st.session_state.run and st.session_state.emotion_log and not st.session_state.report_generated:
     df = pd.DataFrame(st.session_state.emotion_log)
+
+    # --- Compute Engagement Index ---
+    emotion_counts = df['emotion'].value_counts().to_dict()
+    engagement_index = calculate_engagement_index(emotion_counts)
+    engagement_label = classify_engagement(engagement_index)
+
+    st.subheader("📊 Engagement Summary")
+    st.metric("Engagement Index", f"{engagement_index:.2f}", help="Weighted average of emotion scores")
+    st.markdown(f"**Engagement Level:** {engagement_label}")
+
     session_id = st.session_state.session_id
     csv_file = f"emotion_log_{session_id}.csv"
     df.to_csv(csv_file, index=False)

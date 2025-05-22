@@ -21,6 +21,5 @@ reportlab
 slack_sdk
 python-dotenv
 
-# Optional for development
-ipykernel
-
+scikit-learn
+seaborn
